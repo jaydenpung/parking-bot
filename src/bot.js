@@ -283,16 +283,64 @@ Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const username = msg.from.username;
+    const mediaGroupId = msg.media_group_id;
 
+    // If part of a media group, collect all photos first
+    if (mediaGroupId) {
+      if (!this.mediaGroups) {
+        this.mediaGroups = new Map();
+      }
+      
+      if (!this.mediaGroups.has(mediaGroupId)) {
+        this.mediaGroups.set(mediaGroupId, {
+          photos: [],
+          chatId,
+          userId,
+          username,
+          timer: null
+        });
+      }
+      
+      const group = this.mediaGroups.get(mediaGroupId);
+      group.photos.push(msg);
+      
+      // Clear previous timer
+      if (group.timer) {
+        clearTimeout(group.timer);
+      }
+      
+      // Set a timer to process all photos after 1 second of no new photos
+      group.timer = setTimeout(() => {
+        this.processMediaGroup(mediaGroupId);
+      }, 1000);
+      
+      return;
+    }
+
+    // Single photo processing - check if user is already processing anything
     if (this.isProcessing.get(userId)) {
       await this.bot.sendMessage(chatId, '⏳ Still processing your previous image. Please wait...');
       return;
     }
 
     this.isProcessing.set(userId, true);
-
+    
     try {
-      await this.bot.sendMessage(chatId, '📸 Image received! Processing...');
+      const result = await this.processSinglePhoto(msg, chatId, userId, username);
+      
+      if (result.success) {
+        await this.sendSuccessMessage(chatId, result);
+      }
+    } finally {
+      this.isProcessing.set(userId, false);
+    }
+  }
+
+  async processSinglePhoto(msg, chatId, userId, username, suppressMessages = false) {
+    try {
+      if (!suppressMessages) {
+        await this.bot.sendMessage(chatId, '📸 Processing image...');
+      }
       
       const photo = msg.photo[msg.photo.length - 1];
       const file = await this.bot.getFile(photo.file_id);
@@ -302,44 +350,52 @@ Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
       const filePath = path.join(__dirname, '..', 'downloads', filename);
       
       await Utils.downloadFile(fileUrl, filePath);
-      await this.bot.sendMessage(chatId, '🔍 Extracting text from image...');
+      
+      if (!suppressMessages) {
+        await this.bot.sendMessage(chatId, '🔍 Extracting text...');
+      }
       
       const ocrResult = await this.ocr.processImage(filePath);
       
       if (!ocrResult.text || ocrResult.text.length < 5) {
-        await this.bot.sendMessage(chatId, '❌ Could not extract readable text from the image. Please try a clearer photo.');
+        if (!suppressMessages) {
+          await this.bot.sendMessage(chatId, '❌ Could not extract readable text from the image.');
+        }
         await Utils.cleanupFile(filePath);
-        return;
+        return { success: false, error: 'No readable text' };
       }
 
-      await this.bot.sendMessage(chatId, '🤖 Analyzing time information with AI...');
+      if (!suppressMessages) {
+        await this.bot.sendMessage(chatId, '🤖 Analyzing...');
+      }
       
       const timeData = await this.geminiParser.parseTimeRange(ocrResult.text);
       
       if (!timeData.success) {
-        const extractedText = Utils.truncateText(ocrResult.text, 200);
-        const errorMsg = timeData.extractedText 
-          ? `❌ ${timeData.error}\n\nTime-related text found: ${timeData.extractedText}\n\nFull extracted text:\n\`${extractedText}\``
-          : `❌ ${timeData.error}\n\nExtracted text:\n\`${extractedText}\``;
-        
-        await this.bot.sendMessage(chatId, 
-          errorMsg + '\n\nPlease ensure the image contains clear start and end times.', 
-          { parse_mode: 'Markdown' }
-        );
+        if (!suppressMessages) {
+          const extractedText = Utils.truncateText(ocrResult.text, 200);
+          const errorMsg = timeData.extractedText 
+            ? `❌ ${timeData.error}\n\nTime-related text found: ${timeData.extractedText}\n\nFull extracted text:\n\`${extractedText}\``
+            : `❌ ${timeData.error}\n\nExtracted text:\n\`${extractedText}\``;
+          
+          await this.bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
+        }
         await Utils.cleanupFile(filePath);
-        return;
+        return { success: false, error: timeData.error };
       }
 
       // Check for duplicate entries
       const isDuplicate = await this.db.checkDuplicateRecord(chatId, timeData.carPlate, timeData.startDateTime);
       if (isDuplicate) {
-        const startDate = new Date(timeData.startDateTime);
-        await this.bot.sendMessage(chatId, 
-          `🚫 *Duplicate Entry Detected*\n\nThis parking session already exists:\n🚗 Car: ${timeData.carPlate}\n📅 Date: ${startDate.toLocaleDateString()}\n🕐 Start: ${startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}\n\nNo changes made to your total.`, 
-          { parse_mode: 'Markdown' }
-        );
+        if (!suppressMessages) {
+          const startDate = new Date(timeData.startDateTime);
+          await this.bot.sendMessage(chatId, 
+            `🚫 *Duplicate Entry*\n\n🚗 ${timeData.carPlate} - ${startDate.toLocaleDateString()}\nAlready recorded.`, 
+            { parse_mode: 'Markdown' }
+          );
+        }
         await Utils.cleanupFile(filePath);
-        return;
+        return { success: false, error: 'Duplicate entry' };
       }
 
       // Calculate day/night split
@@ -358,26 +414,108 @@ Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
         dayNightSplit.nightMinutes
       );
 
-      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
+      await Utils.cleanupFile(filePath);
+
+      return {
+        success: true,
+        timeData,
+        dayNightSplit,
+        recordId
+      };
+
+    } catch (error) {
+      console.error('Error processing photo:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async processMediaGroup(mediaGroupId) {
+    const group = this.mediaGroups.get(mediaGroupId);
+    if (!group) return;
+
+    const { photos, chatId, userId, username } = group;
+    this.mediaGroups.delete(mediaGroupId);
+
+    if (this.isProcessing.get(userId)) {
+      await this.bot.sendMessage(chatId, '⏳ Already processing. Please wait...');
+      return;
+    }
+
+    this.isProcessing.set(userId, true);
+
+    try {
+      await this.bot.sendMessage(chatId, `📸 Processing ${photos.length} images...`);
       
-      const confidenceEmoji = timeData.confidence === 'high' ? '🎯' : timeData.confidence === 'medium' ? '✅' : '⚠️';
-      const startDate = new Date(timeData.startDateTime);
-      const endDate = new Date(timeData.endDateTime);
-      
-      const startDateStr = startDate.toLocaleDateString();
-      const endDateStr = endDate.toLocaleDateString();
-      const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-      const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-      
-      const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
-      
-      // Calculate limit warnings
-      const dayHoursUsed = Math.floor(currentTotal.day / 60);
-      const nightHoursUsed = Math.floor(currentTotal.night / 60);
-      const dayWarning = dayHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : dayHoursUsed >= 70 ? ' ⚠️' : '';
-      const nightWarning = nightHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : nightHoursUsed >= 70 ? ' ⚠️' : '';
-      
-      const successMessage = `
+      const results = [];
+      let successCount = 0;
+      let duplicateCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < photos.length; i++) {
+        const result = await this.processSinglePhoto(photos[i], chatId, userId, username, true);
+        results.push(result);
+        
+        if (result.success) {
+          successCount++;
+        } else if (result.error === 'Duplicate entry') {
+          duplicateCount++;
+        } else {
+          errorCount++;
+        }
+      }
+
+      // Send summary
+      if (successCount > 0) {
+        const currentTotal = await this.db.getCurrentMonthTotal(chatId);
+        const dayHours = Math.floor(currentTotal.day / 60);
+        const nightHours = Math.floor(currentTotal.night / 60);
+        const dayWarning = dayHours >= 70 ? ' ⚠️' : '';
+        const nightWarning = nightHours >= 70 ? ' ⚠️' : '';
+
+        let summaryMessage = `✅ *Batch Processing Complete!*\n\n`;
+        summaryMessage += `📊 Successfully processed: ${successCount}/${photos.length} images\n`;
+        if (duplicateCount > 0) summaryMessage += `🚫 Duplicates skipped: ${duplicateCount}\n`;
+        if (errorCount > 0) summaryMessage += `❌ Errors: ${errorCount}\n`;
+        summaryMessage += `\n📊 *Updated Monthly Total:*\n`;
+        summaryMessage += `☀️ Day: ${dayHours}h / 80h${dayWarning}\n`;
+        summaryMessage += `🌙 Night: ${nightHours}h / 80h${nightWarning}\n`;
+        summaryMessage += `**Total: ${Utils.formatDetailedDuration(currentTotal.total)}**`;
+
+        await this.bot.sendMessage(chatId, summaryMessage, { parse_mode: 'Markdown' });
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Could not process any of the ${photos.length} images successfully.`);
+      }
+
+    } catch (error) {
+      console.error('Error processing media group:', error);
+      await this.bot.sendMessage(chatId, '❌ Error processing images.');
+    } finally {
+      this.isProcessing.set(userId, false);
+    }
+  }
+
+  async sendSuccessMessage(chatId, result) {
+    const currentTotal = await this.db.getCurrentMonthTotal(chatId);
+    const { timeData, dayNightSplit } = result;
+    
+    const confidenceEmoji = timeData.confidence === 'high' ? '🎯' : timeData.confidence === 'medium' ? '✅' : '⚠️';
+    const startDate = new Date(timeData.startDateTime);
+    const endDate = new Date(timeData.endDateTime);
+    
+    const startDateStr = startDate.toLocaleDateString();
+    const endDateStr = endDate.toLocaleDateString();
+    const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    
+    const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+    
+    // Calculate limit warnings
+    const dayHoursUsed = Math.floor(currentTotal.day / 60);
+    const nightHoursUsed = Math.floor(currentTotal.night / 60);
+    const dayWarning = dayHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : dayHoursUsed >= 70 ? ' ⚠️' : '';
+    const nightWarning = nightHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : nightHoursUsed >= 70 ? ' ⚠️' : '';
+    
+    const successMessage = `
 ${confidenceEmoji} *Parking session recorded!*
 
 👤 Visitor: ${timeData.visitorName}
@@ -386,24 +524,16 @@ ${confidenceEmoji} *Parking session recorded!*
 🕐 Start: ${startTimeStr}
 🕐 End: ${endTimeStr}
 ⏱️ Duration: ${timeData.durationFormatted}
-  ☀️ Day (8am-12am): ${Utils.formatDuration(dayNightSplit.dayMinutes)}
-  🌙 Night (12am-8am): ${Utils.formatDuration(dayNightSplit.nightMinutes)}
+  ☀️ Day: ${Utils.formatDuration(dayNightSplit.dayMinutes)}
+  🌙 Night: ${Utils.formatDuration(dayNightSplit.nightMinutes)}
 
 📊 *This month's total:*
 ☀️ Day: ${dayHoursUsed}h / 80h${dayWarning}
 🌙 Night: ${nightHoursUsed}h / 80h${nightWarning}
 Total: ${Utils.formatDetailedDuration(currentTotal.total)}
-      `;
+    `;
 
-      await this.bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
-      await Utils.cleanupFile(filePath);
-
-    } catch (error) {
-      console.error('Error processing photo:', error);
-      await this.bot.sendMessage(chatId, '❌ An error occurred while processing your image. Please try again.');
-    } finally {
-      this.isProcessing.set(userId, false);
-    }
+    await this.bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
   }
 
   async handleDocument(msg) {
