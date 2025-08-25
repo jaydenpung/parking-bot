@@ -31,10 +31,9 @@ class ParkingBot {
   }
 
   setupHandlers() {
-    this.bot.onText(/\/start/, this.handleStart.bind(this));
-    this.bot.onText(/\/current/, this.handleCurrent.bind(this));
+    this.bot.onText(/\/start/, this.handleHelp.bind(this));
     this.bot.onText(/\/history/, this.handleHistory.bind(this));
-    this.bot.onText(/\/recent/, this.handleRecent.bind(this));
+    this.bot.onText(/\/current/, this.handleCurrent.bind(this));
     this.bot.onText(/\/help/, this.handleHelp.bind(this));
     this.bot.onText(/\/reset/, this.handleReset.bind(this));
     this.bot.on('photo', this.handlePhoto.bind(this));
@@ -45,69 +44,50 @@ class ParkingBot {
     });
   }
 
-  async handleStart(msg) {
-    const chatId = msg.chat.id;
-    const username = msg.from.username || 'User';
 
-    const welcomeMessage = `
-🚗 *Welcome to Parking Duration Tracker!*
-
-I help you track your parking time by analyzing screenshots of parking tickets or meters.
-
-*How to use:*
-📸 Send me a screenshot of your parking ticket/meter
-⏱️ I'll extract the start and end times
-📊 Your parking duration will be added to this month's total
-
-*Commands:*
-/current - View this month's total parking time
-/history - See previous months' totals
-/recent - Show your last 5 parking sessions
-/reset - Reset current month (requires confirmation)
-/help - Show this help message
-
-Just send me a photo to get started! 🎯
-    `;
-
-    await this.bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
-  }
-
-  async handleCurrent(msg) {
-    const chatId = msg.chat.id;
-
-    try {
-      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
-      const now = new Date();
-      const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
-      
-      const message = currentTotal > 0 
-        ? `🅿️ *${monthName}*\nTotal parking time: *${Utils.formatDetailedDuration(currentTotal)}*`
-        : `🅿️ *${monthName}*\nNo parking time recorded yet this month.`;
-
-      await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-    } catch (error) {
-      console.error('Error getting current month total:', error);
-      await this.bot.sendMessage(chatId, '❌ Error retrieving current month data.');
-    }
-  }
 
   async handleHistory(msg) {
     const chatId = msg.chat.id;
 
     try {
-      const history = await this.db.getMonthlyHistory(chatId);
+      const allRecords = await this.db.getAllRecordsGroupedByMonth(chatId);
+      const monthlyTotals = await this.db.getMonthlyHistory(chatId);
       
-      if (history.length === 0) {
+      if (allRecords.length === 0) {
         await this.bot.sendMessage(chatId, '📊 No parking history found.');
         return;
       }
 
-      let message = '📊 *Parking History:*\n\n';
+      let message = '📊 *Complete Parking History:*\n\n';
       
-      for (const record of history) {
-        const monthName = Utils.formatMonthName(record.month, record.year);
-        const duration = Utils.formatDetailedDuration(record.total_duration_minutes);
-        message += `• ${monthName}: ${duration}\n`;
+      // Group records by month/year
+      const recordsByMonth = {};
+      for (const record of allRecords) {
+        const key = `${record.year}-${record.month}`;
+        if (!recordsByMonth[key]) {
+          recordsByMonth[key] = [];
+        }
+        recordsByMonth[key].push(record);
+      }
+      
+      // Display each month
+      for (const totals of monthlyTotals) {
+        const monthName = Utils.formatMonthName(totals.month, totals.year);
+        const monthTotal = Utils.formatDetailedDuration(totals.total_duration_minutes);
+        const key = `${totals.year}-${totals.month}`;
+        
+        message += `**${monthName}** - Total: **${monthTotal}**\n`;
+        
+        const monthRecords = recordsByMonth[key] || [];
+        for (const record of monthRecords) {
+          const duration = Utils.formatDuration(record.duration_minutes);
+          const visitor = record.visitor_name || 'Unknown';
+          const startDate = new Date(record.start_datetime);
+          const dateStr = startDate.toLocaleDateString();
+          
+          message += `  • ${visitor} - ${dateStr} (${duration})\n`;
+        }
+        message += '\n';
       }
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -117,40 +97,38 @@ Just send me a photo to get started! 🎯
     }
   }
 
-  async handleRecent(msg) {
+  async handleCurrent(msg) {
     const chatId = msg.chat.id;
 
     try {
-      const recentRecords = await this.db.getRecentRecords(chatId);
+      const currentRecords = await this.db.getCurrentMonthRecords(chatId);
+      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
       
-      if (recentRecords.length === 0) {
-        await this.bot.sendMessage(chatId, '📝 No parking sessions found.');
+      const now = new Date();
+      const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
+      
+      if (currentRecords.length === 0) {
+        await this.bot.sendMessage(chatId, `📝 *${monthName}*\n\nNo parking sessions this month.`);
         return;
       }
 
-      let message = '📝 *Recent Parking Sessions:*\n\n';
+      let message = `📝 *${monthName}*\n\n`;
       
-      for (const record of recentRecords) {
+      for (const record of currentRecords) {
         const duration = Utils.formatDuration(record.duration_minutes);
-        const visitor = record.visitor_name ? `${record.visitor_name} - ` : '';
-        
+        const visitor = record.visitor_name || 'Unknown';
         const startDate = new Date(record.start_datetime);
-        const endDate = new Date(record.end_datetime);
+        const dateStr = startDate.toLocaleDateString();
         
-        const startDateStr = startDate.toLocaleDateString();
-        const endDateStr = endDate.toLocaleDateString();
-        const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-        const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-        
-        const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
-        
-        message += `• ${dateDisplay}: ${visitor}${record.car_plate}\n  ${startTimeStr} - ${endTimeStr} (${duration})\n`;
+        message += `• ${visitor} - ${dateStr} (${duration})\n`;
       }
+      
+      message += `\n**📊 Total: ${Utils.formatDetailedDuration(currentTotal)}**`;
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     } catch (error) {
-      console.error('Error getting recent records:', error);
-      await this.bot.sendMessage(chatId, '❌ Error retrieving recent sessions.');
+      console.error('Error getting current month records:', error);
+      await this.bot.sendMessage(chatId, '❌ Error retrieving current month data.');
     }
   }
 
@@ -172,9 +150,8 @@ Just send me a photo to get started! 🎯
 • Text patterns: "From 9:00 to 17:00"
 
 *Commands:*
-/current - Current month's total
-/history - Previous months' history
-/recent - Last 5 parking sessions
+/current - Current month's parking sessions and total
+/history - Complete parking history by month
 /reset - Reset current month (requires confirmation)
 /help - This help message
 

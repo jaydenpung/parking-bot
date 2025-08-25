@@ -230,17 +230,39 @@ class Database {
     });
   }
 
-  async getRecentRecords(chatId, limit = 5) {
+  async getCurrentMonthRecords(chatId) {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+
     return new Promise((resolve, reject) => {
       const sql = `
         SELECT visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, created_at
         FROM parking_records
-        WHERE chat_id = ?
+        WHERE chat_id = ? AND month = ? AND year = ?
         ORDER BY created_at DESC
-        LIMIT ?
       `;
 
-      this.db.all(sql, [chatId, limit], (err, rows) => {
+      this.db.all(sql, [chatId, month, year], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows || []);
+        }
+      });
+    });
+  }
+
+  async getAllRecordsGroupedByMonth(chatId) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, created_at, month, year
+        FROM parking_records
+        WHERE chat_id = ?
+        ORDER BY year DESC, month DESC, created_at DESC
+      `;
+
+      this.db.all(sql, [chatId], (err, rows) => {
         if (err) {
           reject(err);
         } else {
