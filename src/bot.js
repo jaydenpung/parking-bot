@@ -72,10 +72,9 @@ Just send me a photo to get started! 🎯
 
   async handleCurrent(msg) {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
 
     try {
-      const currentTotal = await this.db.getCurrentMonthTotal(userId);
+      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
       const now = new Date();
       const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
       
@@ -92,10 +91,9 @@ Just send me a photo to get started! 🎯
 
   async handleHistory(msg) {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
 
     try {
-      const history = await this.db.getMonthlyHistory(userId);
+      const history = await this.db.getMonthlyHistory(chatId);
       
       if (history.length === 0) {
         await this.bot.sendMessage(chatId, '📊 No parking history found.');
@@ -119,10 +117,9 @@ Just send me a photo to get started! 🎯
 
   async handleRecent(msg) {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
 
     try {
-      const recentRecords = await this.db.getRecentRecords(userId);
+      const recentRecords = await this.db.getRecentRecords(chatId);
       
       if (recentRecords.length === 0) {
         await this.bot.sendMessage(chatId, '📝 No parking sessions found.');
@@ -231,7 +228,7 @@ Need help? Just send me a photo! 📸
       }
 
       // Check for duplicate entries
-      const isDuplicate = await this.db.checkDuplicateRecord(userId, timeData.carPlate, timeData.startTime);
+      const isDuplicate = await this.db.checkDuplicateRecord(chatId, timeData.carPlate, timeData.startTime);
       if (isDuplicate) {
         await this.bot.sendMessage(chatId, 
           `🚫 *Duplicate Entry Detected*\n\nThis parking session already exists:\n🚗 Car: ${timeData.carPlate}\n🕐 Start: ${timeData.startTime}\n\nNo changes made to your total.`, 
@@ -242,6 +239,7 @@ Need help? Just send me a photo! 📸
       }
 
       const recordId = await this.db.addParkingRecord(
+        chatId,
         userId,
         username,
         timeData.visitorName,
@@ -251,7 +249,7 @@ Need help? Just send me a photo! 📸
         timeData.durationMinutes
       );
 
-      const currentTotal = await this.db.getCurrentMonthTotal(userId);
+      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
       
       const confidenceEmoji = timeData.confidence === 'high' ? '🎯' : timeData.confidence === 'medium' ? '✅' : '⚠️';
       const successMessage = `
