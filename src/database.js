@@ -33,6 +33,8 @@ class Database {
           start_datetime DATETIME NOT NULL,
           end_datetime DATETIME NOT NULL,
           duration_minutes INTEGER NOT NULL,
+          day_minutes INTEGER DEFAULT 0,
+          night_minutes INTEGER DEFAULT 0,
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -45,6 +47,8 @@ class Database {
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
           total_duration_minutes INTEGER DEFAULT 0,
+          total_day_minutes INTEGER DEFAULT 0,
+          total_night_minutes INTEGER DEFAULT 0,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(chat_id, month, year)
         );
@@ -96,6 +100,10 @@ class Database {
       await runQuery('ALTER TABLE monthly_totals ADD COLUMN chat_id INTEGER');
       await runQuery('ALTER TABLE parking_records ADD COLUMN start_datetime DATETIME');
       await runQuery('ALTER TABLE parking_records ADD COLUMN end_datetime DATETIME');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN day_minutes INTEGER DEFAULT 0');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN night_minutes INTEGER DEFAULT 0');
+      await runQuery('ALTER TABLE monthly_totals ADD COLUMN total_day_minutes INTEGER DEFAULT 0');
+      await runQuery('ALTER TABLE monthly_totals ADD COLUMN total_night_minutes INTEGER DEFAULT 0');
 
       // Create indexes
       const indexSql = `
@@ -112,7 +120,7 @@ class Database {
     }
   }
 
-  async addParkingRecord(chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes) {
+  async addParkingRecord(chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes, dayMinutes, nightMinutes) {
     // Extract date components from start datetime for monthly tracking
     const startDate = new Date(startDateTime);
     const month = startDate.getMonth() + 1;
@@ -120,11 +128,11 @@ class Database {
 
     return new Promise((resolve, reject) => {
       const sql = `
-        INSERT INTO parking_records (chat_id, user_id, username, visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, month, year)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO parking_records (chat_id, user_id, username, visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, day_minutes, night_minutes, month, year)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      this.db.run(sql, [chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes, month, year], function(err) {
+      this.db.run(sql, [chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes, dayMinutes, nightMinutes, month, year], function(err) {
         if (err) {
           reject(err);
         } else {
@@ -132,7 +140,7 @@ class Database {
         }
       });
     }).then((recordId) => {
-      return this.updateMonthlyTotal(chatId, username, month, year, durationMinutes).then(() => recordId);
+      return this.updateMonthlyTotal(chatId, username, month, year, dayMinutes, nightMinutes).then(() => recordId);
     });
   }
 
@@ -154,7 +162,9 @@ class Database {
     });
   }
 
-  async updateMonthlyTotal(chatId, username, month, year, additionalMinutes) {
+  async updateMonthlyTotal(chatId, username, month, year, dayMinutes, nightMinutes) {
+    const totalMinutes = dayMinutes + nightMinutes;
+    
     const updateQuery = (sql, params) => {
       return new Promise((resolve, reject) => {
         this.db.run(sql, params, function(err) {
@@ -168,18 +178,20 @@ class Database {
       // First try to update existing record
       const changes = await updateQuery(
         `UPDATE monthly_totals SET 
-         total_duration_minutes = total_duration_minutes + ?, 
+         total_duration_minutes = total_duration_minutes + ?,
+         total_day_minutes = total_day_minutes + ?,
+         total_night_minutes = total_night_minutes + ?, 
          updated_at = CURRENT_TIMESTAMP 
          WHERE chat_id = ? AND month = ? AND year = ?`,
-        [additionalMinutes, chatId, month, year]
+        [totalMinutes, dayMinutes, nightMinutes, chatId, month, year]
       );
 
       // If no rows were updated, insert new record
       if (changes === 0) {
         await updateQuery(
-          `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes) 
-           VALUES (?, ?, ?, ?, ?)`,
-          [chatId, username, month, year, additionalMinutes]
+          `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes, total_day_minutes, total_night_minutes) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [chatId, username, month, year, totalMinutes, dayMinutes, nightMinutes]
         );
       }
     } catch (error) {
@@ -195,7 +207,7 @@ class Database {
 
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT total_duration_minutes 
+        SELECT total_duration_minutes, total_day_minutes, total_night_minutes 
         FROM monthly_totals 
         WHERE chat_id = ? AND month = ? AND year = ?
       `;
@@ -204,7 +216,15 @@ class Database {
         if (err) {
           reject(err);
         } else {
-          resolve(row ? row.total_duration_minutes : 0);
+          resolve(row ? {
+            total: row.total_duration_minutes || 0,
+            day: row.total_day_minutes || 0,
+            night: row.total_night_minutes || 0
+          } : {
+            total: 0,
+            day: 0,
+            night: 0
+          });
         }
       });
     });
@@ -213,7 +233,7 @@ class Database {
   async getMonthlyHistory(chatId) {
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT month, year, total_duration_minutes
+        SELECT month, year, total_duration_minutes, total_day_minutes, total_night_minutes
         FROM monthly_totals
         WHERE chat_id = ?
         ORDER BY year DESC, month DESC
@@ -237,7 +257,7 @@ class Database {
 
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, created_at
+        SELECT visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, day_minutes, night_minutes, created_at
         FROM parking_records
         WHERE chat_id = ? AND month = ? AND year = ?
         ORDER BY created_at DESC

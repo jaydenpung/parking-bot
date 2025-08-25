@@ -35,6 +35,54 @@ class Utils {
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }
 
+  static calculateDayNightSplit(startDateTime, endDateTime) {
+    const start = new Date(startDateTime);
+    const end = new Date(endDateTime);
+    
+    let dayMinutes = 0;  // 8am to 12am (midnight)
+    let nightMinutes = 0; // 12am to 8am
+    
+    let current = new Date(start);
+    
+    while (current < end) {
+      const currentHour = current.getHours();
+      const currentMinute = current.getMinutes();
+      
+      // Calculate minutes until next boundary or end time
+      let nextBoundary = new Date(current);
+      
+      if (currentHour >= 8) {
+        // Currently in day time (8am-12am)
+        nextBoundary.setHours(24, 0, 0, 0); // Next midnight
+      } else {
+        // Currently in night time (12am-8am)
+        nextBoundary.setHours(8, 0, 0, 0); // Next 8am
+      }
+      
+      // Don't go past end time
+      if (nextBoundary > end) {
+        nextBoundary = new Date(end);
+      }
+      
+      // Calculate minutes in this period
+      const minutesInPeriod = Math.floor((nextBoundary - current) / (1000 * 60));
+      
+      if (currentHour >= 8) {
+        dayMinutes += minutesInPeriod;
+      } else {
+        nightMinutes += minutesInPeriod;
+      }
+      
+      current = nextBoundary;
+    }
+    
+    return {
+      dayMinutes,
+      nightMinutes,
+      totalMinutes: dayMinutes + nightMinutes
+    };
+  }
+
   static async downloadFile(url, filePath) {
     try {
       const response = await axios({

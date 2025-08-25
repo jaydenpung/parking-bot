@@ -73,21 +73,13 @@ class ParkingBot {
       // Display each month
       for (const totals of monthlyTotals) {
         const monthName = Utils.formatMonthName(totals.month, totals.year);
-        const monthTotal = Utils.formatDetailedDuration(totals.total_duration_minutes);
+        const dayHours = Math.floor((totals.total_day_minutes || 0) / 60);
+        const nightHours = Math.floor((totals.total_night_minutes || 0) / 60);
         const key = `${totals.year}-${totals.month}`;
         
-        message += `**${monthName}** - Total: **${monthTotal}**\n`;
-        
-        const monthRecords = recordsByMonth[key] || [];
-        for (const record of monthRecords) {
-          const duration = Utils.formatDuration(record.duration_minutes);
-          const visitor = record.visitor_name || 'Unknown';
-          const startDate = new Date(record.start_datetime);
-          const dateStr = startDate.toLocaleDateString();
-          
-          message += `  • ${visitor} - ${dateStr} (${duration})\n`;
-        }
-        message += '\n';
+        message += `**${monthName}**\n`;
+        message += `☀️ Day: ${dayHours}h / 80h | 🌙 Night: ${nightHours}h / 80h\n`;
+        message += `Total: ${Utils.formatDetailedDuration(totals.total_duration_minutes)}\n\n`;
       }
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -108,22 +100,43 @@ class ParkingBot {
       const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
       
       if (currentRecords.length === 0) {
-        await this.bot.sendMessage(chatId, `📝 *${monthName}*\n\nNo parking sessions this month.`);
+        await this.bot.sendMessage(chatId, `📝 *${monthName}*\n\nNo parking sessions this month.`, { parse_mode: 'Markdown' });
         return;
       }
 
-      let message = `📝 *${monthName}*\n\n`;
+      let message = `📝 *${monthName} Parking Details*\n\n`;
       
+      // Show detailed breakdown for each record
       for (const record of currentRecords) {
-        const duration = Utils.formatDuration(record.duration_minutes);
-        const visitor = record.visitor_name || 'Unknown';
         const startDate = new Date(record.start_datetime);
-        const dateStr = startDate.toLocaleDateString();
+        const endDate = new Date(record.end_datetime);
         
-        message += `• ${visitor} - ${dateStr} (${duration})\n`;
+        const dateStr = startDate.toLocaleDateString();
+        const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        
+        const dayMinutes = record.day_minutes || 0;
+        const nightMinutes = record.night_minutes || 0;
+        
+        message += `🚗 *${record.car_plate}* - ${record.visitor_name || 'Unknown'}\n`;
+        message += `📅 ${dateStr}\n`;
+        message += `⏰ ${startTimeStr} → ${endTimeStr}\n`;
+        message += `☀️ Day: ${Utils.formatDuration(dayMinutes)} | 🌙 Night: ${Utils.formatDuration(nightMinutes)}\n`;
+        message += `─────────────\n`;
       }
       
-      message += `\n**📊 Total: ${Utils.formatDetailedDuration(currentTotal)}**`;
+      // Calculate hours and warnings
+      const dayHours = Math.floor(currentTotal.day / 60);
+      const dayMins = currentTotal.day % 60;
+      const nightHours = Math.floor(currentTotal.night / 60);
+      const nightMins = currentTotal.night % 60;
+      const dayWarning = dayHours >= 80 ? ' ⚠️ *LIMIT*' : dayHours >= 70 ? ' ⚠️' : '';
+      const nightWarning = nightHours >= 80 ? ' ⚠️ *LIMIT*' : nightHours >= 70 ? ' ⚠️' : '';
+      
+      message += `\n📊 *Monthly Total:*\n`;
+      message += `☀️ Day: ${dayHours}h ${dayMins}m / 80h${dayWarning}\n`;
+      message += `🌙 Night: ${nightHours}h ${nightMins}m / 80h${nightWarning}\n`;
+      message += `**Total: ${Utils.formatDetailedDuration(currentTotal.total)}**`;
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     } catch (error) {
@@ -176,7 +189,7 @@ Need help? Just send me a photo! 📸
       const now = new Date();
       const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
 
-      if (currentTotal === 0) {
+      if (currentTotal.total === 0) {
         await this.bot.sendMessage(chatId, `🅿️ *${monthName}*\n\nNo parking records to reset - your total is already 0.`, { parse_mode: 'Markdown' });
         return;
       }
@@ -192,7 +205,9 @@ This will:
 • Reset monthly total to 0 minutes
 • Cannot be undone
 
-Current total: *${Utils.formatDetailedDuration(currentTotal)}*
+Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
+☀️ Day: ${Math.floor(currentTotal.day / 60)}h
+🌙 Night: ${Math.floor(currentTotal.night / 60)}h
       `;
 
       const options = {
@@ -327,6 +342,9 @@ Current total: *${Utils.formatDetailedDuration(currentTotal)}*
         return;
       }
 
+      // Calculate day/night split
+      const dayNightSplit = Utils.calculateDayNightSplit(timeData.startDateTime, timeData.endDateTime);
+      
       const recordId = await this.db.addParkingRecord(
         chatId,
         userId,
@@ -335,7 +353,9 @@ Current total: *${Utils.formatDetailedDuration(currentTotal)}*
         timeData.carPlate,
         timeData.startDateTime,
         timeData.endDateTime,
-        timeData.durationMinutes
+        timeData.durationMinutes,
+        dayNightSplit.dayMinutes,
+        dayNightSplit.nightMinutes
       );
 
       const currentTotal = await this.db.getCurrentMonthTotal(chatId);
@@ -351,6 +371,12 @@ Current total: *${Utils.formatDetailedDuration(currentTotal)}*
       
       const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
       
+      // Calculate limit warnings
+      const dayHoursUsed = Math.floor(currentTotal.day / 60);
+      const nightHoursUsed = Math.floor(currentTotal.night / 60);
+      const dayWarning = dayHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : dayHoursUsed >= 70 ? ' ⚠️' : '';
+      const nightWarning = nightHoursUsed >= 80 ? ' ⚠️ *LIMIT REACHED*' : nightHoursUsed >= 70 ? ' ⚠️' : '';
+      
       const successMessage = `
 ${confidenceEmoji} *Parking session recorded!*
 
@@ -360,9 +386,13 @@ ${confidenceEmoji} *Parking session recorded!*
 🕐 Start: ${startTimeStr}
 🕐 End: ${endTimeStr}
 ⏱️ Duration: ${timeData.durationFormatted}
-🤖 Confidence: ${timeData.confidence}
+  ☀️ Day (8am-12am): ${Utils.formatDuration(dayNightSplit.dayMinutes)}
+  🌙 Night (12am-8am): ${Utils.formatDuration(dayNightSplit.nightMinutes)}
 
-📊 This month's total: *${Utils.formatDetailedDuration(currentTotal)}*
+📊 *This month's total:*
+☀️ Day: ${dayHoursUsed}h / 80h${dayWarning}
+🌙 Night: ${nightHoursUsed}h / 80h${nightWarning}
+Total: ${Utils.formatDetailedDuration(currentTotal.total)}
       `;
 
       await this.bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
