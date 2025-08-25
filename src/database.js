@@ -155,42 +155,37 @@ class Database {
   }
 
   async updateMonthlyTotal(chatId, username, month, year, additionalMinutes) {
-    return new Promise((resolve, reject) => {
+    const updateQuery = (sql, params) => {
+      return new Promise((resolve, reject) => {
+        this.db.run(sql, params, function(err) {
+          if (err) reject(err);
+          else resolve(this.changes);
+        });
+      });
+    };
+
+    try {
       // First try to update existing record
-      this.db.run(
+      const changes = await updateQuery(
         `UPDATE monthly_totals SET 
          total_duration_minutes = total_duration_minutes + ?, 
          updated_at = CURRENT_TIMESTAMP 
          WHERE chat_id = ? AND month = ? AND year = ?`,
-        [additionalMinutes, chatId, month, year],
-        function(err) {
-          if (err) {
-            reject(err);
-            return;
-          }
-          
-          // If no rows were updated, insert new record
-          if (this.changes === 0) {
-            // Fix: Use the outer scope's 'this.db' reference
-            const outerThis = this;
-            outerThis.db.run(
-              `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes) 
-               VALUES (?, ?, ?, ?, ?)`,
-              [chatId, username, month, year, additionalMinutes],
-              (err) => {
-                if (err) {
-                  reject(err);
-                } else {
-                  resolve();
-                }
-              }
-            );
-          } else {
-            resolve();
-          }
-        }.bind(this)
+        [additionalMinutes, chatId, month, year]
       );
-    });
+
+      // If no rows were updated, insert new record
+      if (changes === 0) {
+        await updateQuery(
+          `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes) 
+           VALUES (?, ?, ?, ?, ?)`,
+          [chatId, username, month, year, additionalMinutes]
+        );
+      }
+    } catch (error) {
+      console.error('Error updating monthly total:', error);
+      throw error;
+    }
   }
 
   async getCurrentMonthTotal(chatId) {
