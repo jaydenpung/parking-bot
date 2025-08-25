@@ -166,7 +166,8 @@ class Database {
           
           // If no rows were updated, insert new record
           if (this.changes === 0) {
-            this.db.run(
+            const db = this.db;
+            db.run(
               `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes) 
                VALUES (?, ?, ?, ?, ?)`,
               [chatId, username, month, year, additionalMinutes],
@@ -254,18 +255,31 @@ class Database {
     const year = now.getFullYear();
 
     return new Promise((resolve, reject) => {
-      const sql = `
-        UPDATE monthly_totals
-        SET total_duration_minutes = 0, updated_at = CURRENT_TIMESTAMP
+      // First delete all parking records for this month
+      const deleteRecordsSql = `
+        DELETE FROM parking_records
         WHERE chat_id = ? AND month = ? AND year = ?
       `;
 
-      this.db.run(sql, [chatId, month, year], (err) => {
+      this.db.run(deleteRecordsSql, [chatId, month, year], (err) => {
         if (err) {
           reject(err);
-        } else {
-          resolve();
+          return;
         }
+
+        // Then reset/delete the monthly total
+        const resetTotalSql = `
+          DELETE FROM monthly_totals
+          WHERE chat_id = ? AND month = ? AND year = ?
+        `;
+
+        this.db.run(resetTotalSql, [chatId, month, year], (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
       });
     });
   }

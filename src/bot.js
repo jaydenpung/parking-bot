@@ -36,6 +36,7 @@ class ParkingBot {
     this.bot.onText(/\/history/, this.handleHistory.bind(this));
     this.bot.onText(/\/recent/, this.handleRecent.bind(this));
     this.bot.onText(/\/help/, this.handleHelp.bind(this));
+    this.bot.onText(/\/reset/, this.handleReset.bind(this));
     this.bot.on('photo', this.handlePhoto.bind(this));
     this.bot.on('document', this.handleDocument.bind(this));
 
@@ -163,6 +164,7 @@ Just send me a photo to get started! 🎯
 /current - Current month's total
 /history - Previous months' history
 /recent - Last 5 parking sessions
+/reset - Reset current month (requires confirmation)
 /help - This help message
 
 *Tips:*
@@ -174,6 +176,104 @@ Need help? Just send me a photo! 📸
     `;
 
     await this.bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+  }
+
+  async handleReset(msg) {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    try {
+      // Get current month info
+      const currentTotal = await this.db.getCurrentMonthTotal(chatId);
+      const now = new Date();
+      const monthName = Utils.formatMonthName(now.getMonth() + 1, now.getFullYear());
+
+      if (currentTotal === 0) {
+        await this.bot.sendMessage(chatId, `🅿️ *${monthName}*\n\nNo parking records to reset - your total is already 0.`, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      // Create confirmation buttons
+      const confirmationMessage = `
+🚨 *Reset Confirmation*
+
+Are you sure you want to reset *${monthName}*?
+
+This will:
+• Delete ALL parking records for this month
+• Reset monthly total to 0 minutes
+• Cannot be undone
+
+Current total: *${Utils.formatDetailedDuration(currentTotal)}*
+      `;
+
+      const options = {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Yes, Reset', callback_data: `confirm_reset_${chatId}` },
+              { text: '❌ Cancel', callback_data: `cancel_reset_${chatId}` }
+            ]
+          ]
+        }
+      };
+
+      await this.bot.sendMessage(chatId, confirmationMessage, options);
+
+      // Handle callback responses
+      this.bot.once('callback_query', async (callbackQuery) => {
+        const data = callbackQuery.data;
+        const callbackChatId = callbackQuery.message.chat.id;
+        const callbackUserId = callbackQuery.from.id;
+
+        // Only allow the same user who initiated the reset to confirm
+        if (callbackUserId !== userId) {
+          await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Only the user who initiated the reset can confirm.', show_alert: true });
+          return;
+        }
+
+        if (data === `confirm_reset_${chatId}`) {
+          try {
+            await this.db.resetCurrentMonth(chatId);
+            await this.bot.editMessageText(
+              `✅ *Reset Complete*\n\n${monthName} parking records have been cleared.\n\nTotal reset to: *0 minutes*`,
+              {
+                chat_id: callbackChatId,
+                message_id: callbackQuery.message.message_id,
+                parse_mode: 'Markdown'
+              }
+            );
+            await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Reset completed successfully!' });
+          } catch (error) {
+            console.error('Error during reset:', error);
+            await this.bot.editMessageText(
+              '❌ *Reset Failed*\n\nAn error occurred while resetting. Please try again.',
+              {
+                chat_id: callbackChatId,
+                message_id: callbackQuery.message.message_id,
+                parse_mode: 'Markdown'
+              }
+            );
+            await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Reset failed!', show_alert: true });
+          }
+        } else if (data === `cancel_reset_${chatId}`) {
+          await this.bot.editMessageText(
+            '🅿️ *Reset Cancelled*\n\nYour parking records remain unchanged.',
+            {
+              chat_id: callbackChatId,
+              message_id: callbackQuery.message.message_id,
+              parse_mode: 'Markdown'
+            }
+          );
+          await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Reset cancelled.' });
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in reset handler:', error);
+      await this.bot.sendMessage(chatId, '❌ Error initiating reset. Please try again.');
+    }
   }
 
   async handlePhoto(msg) {
