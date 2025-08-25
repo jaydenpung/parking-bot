@@ -1,0 +1,8 @@
+node_modules/
+.env
+parking.db
+*.log
+.DS_Store
+downloads/
+temp/
+eng.traineddata
