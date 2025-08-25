@@ -17,12 +17,16 @@ ${ocrText}
 
 Instructions:
 1. Look for start and end times (could be in formats like "9:00 AM - 5:00 PM", "0900-1700", "From 9:00 to 17:00", etc.)
-2. Convert times to 24-hour format (HH:MM)
-3. Calculate duration in minutes
-4. Return ONLY a JSON object with this exact structure:
+2. Extract visitor name (usually found near "Visitor Name" field)
+3. Extract car plate number (usually found near "Car Plate No" or similar field)
+4. Convert times to 24-hour format (HH:MM)
+5. Calculate duration in minutes
+6. Return ONLY a JSON object with this exact structure:
 
 {
   "success": true/false,
+  "visitorName": "extracted name",
+  "carPlate": "extracted plate number",
   "startTime": "HH:MM" (24-hour format),
   "endTime": "HH:MM" (24-hour format),
   "durationMinutes": number,
@@ -37,9 +41,10 @@ If you cannot find clear start and end times, return:
 }
 
 Examples:
-- "9:00 AM - 5:00 PM" → {"success": true, "startTime": "09:00", "endTime": "17:00", "durationMinutes": 480, "confidence": "high"}
-- "From 0900 to 1730" → {"success": true, "startTime": "09:00", "endTime": "17:30", "durationMinutes": 510, "confidence": "high"}
-- "Start: 2:30 PM End: 6:45 PM" → {"success": true, "startTime": "14:30", "endTime": "18:45", "durationMinutes": 255, "confidence": "high"}
+- Input: "Visitor Name: John Doe, Car Plate No: ABC123, 9:00 AM - 5:00 PM" 
+  → {"success": true, "visitorName": "John Doe", "carPlate": "ABC123", "startTime": "09:00", "endTime": "17:00", "durationMinutes": 480, "confidence": "high"}
+- Input: "From 0900 to 1730, Plate: XYZ789, Name: Jane Smith" 
+  → {"success": true, "visitorName": "Jane Smith", "carPlate": "XYZ789", "startTime": "09:00", "endTime": "17:30", "durationMinutes": 510, "confidence": "high"}
 
 Return ONLY the JSON object, no other text.
     `;
@@ -69,6 +74,8 @@ Return ONLY the JSON object, no other text.
       // Validate the response structure
       if (parsedResult.success && parsedResult.startTime && parsedResult.endTime && typeof parsedResult.durationMinutes === 'number') {
         return {
+          visitorName: parsedResult.visitorName || 'Unknown',
+          carPlate: parsedResult.carPlate || 'Unknown',
           startTime: parsedResult.startTime,
           endTime: parsedResult.endTime,
           durationMinutes: parsedResult.durationMinutes,

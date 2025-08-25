@@ -28,6 +28,8 @@ class Database {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
           username TEXT,
+          visitor_name TEXT,
+          car_plate TEXT,
           start_time TEXT NOT NULL,
           end_time TEXT NOT NULL,
           duration_minutes INTEGER NOT NULL,
@@ -46,9 +48,6 @@ class Database {
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(user_id, month, year)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_user_month_year ON parking_records(user_id, month, year);
-        CREATE INDEX IF NOT EXISTS idx_monthly_totals ON monthly_totals(user_id, month, year);
       `;
 
       this.db.exec(sql, (err) => {
@@ -56,24 +55,57 @@ class Database {
           reject(err);
         } else {
           console.log('Database tables created/verified');
-          resolve();
+          this.addNewColumns().then(resolve).catch(reject);
         }
       });
     });
   }
 
-  async addParkingRecord(userId, username, startTime, endTime, durationMinutes) {
+  async addNewColumns() {
+    return new Promise((resolve, reject) => {
+      // Add visitor_name column if it doesn't exist
+      this.db.run('ALTER TABLE parking_records ADD COLUMN visitor_name TEXT', (err) => {
+        if (err && !err.message.includes('duplicate column name')) {
+          console.error('Error adding visitor_name column:', err);
+        }
+        
+        // Add car_plate column if it doesn't exist
+        this.db.run('ALTER TABLE parking_records ADD COLUMN car_plate TEXT', (err) => {
+          if (err && !err.message.includes('duplicate column name')) {
+            console.error('Error adding car_plate column:', err);
+          }
+          
+          // Create indexes
+          const indexSql = `
+            CREATE INDEX IF NOT EXISTS idx_user_month_year ON parking_records(user_id, month, year);
+            CREATE INDEX IF NOT EXISTS idx_monthly_totals ON monthly_totals(user_id, month, year);
+            CREATE INDEX IF NOT EXISTS idx_duplicate_check ON parking_records(user_id, car_plate, start_time);
+          `;
+          
+          this.db.exec(indexSql, (err) => {
+            if (err) {
+              console.error('Error creating indexes:', err);
+            }
+            console.log('Database migration completed');
+            resolve();
+          });
+        });
+      });
+    });
+  }
+
+  async addParkingRecord(userId, username, visitorName, carPlate, startTime, endTime, durationMinutes) {
     const now = new Date();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
 
     return new Promise((resolve, reject) => {
       const sql = `
-        INSERT INTO parking_records (user_id, username, start_time, end_time, duration_minutes, month, year)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO parking_records (user_id, username, visitor_name, car_plate, start_time, end_time, duration_minutes, month, year)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      this.db.run(sql, [userId, username, startTime, endTime, durationMinutes, month, year], function(err) {
+      this.db.run(sql, [userId, username, visitorName, carPlate, startTime, endTime, durationMinutes, month, year], function(err) {
         if (err) {
           reject(err);
         } else {
@@ -82,6 +114,24 @@ class Database {
       });
     }).then((recordId) => {
       return this.updateMonthlyTotal(userId, username, month, year, durationMinutes).then(() => recordId);
+    });
+  }
+
+  async checkDuplicateRecord(userId, carPlate, startTime) {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT id FROM parking_records
+        WHERE user_id = ? AND car_plate = ? AND start_time = ?
+        LIMIT 1
+      `;
+
+      this.db.get(sql, [userId, carPlate, startTime], (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(!!row); // Returns true if duplicate exists
+        }
+      });
     });
   }
 
@@ -151,7 +201,7 @@ class Database {
   async getRecentRecords(userId, limit = 5) {
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT start_time, end_time, duration_minutes, created_at
+        SELECT visitor_name, car_plate, start_time, end_time, duration_minutes, created_at
         FROM parking_records
         WHERE user_id = ?
         ORDER BY created_at DESC

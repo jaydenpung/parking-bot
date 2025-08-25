@@ -134,7 +134,8 @@ Just send me a photo to get started! 🎯
       for (const record of recentRecords) {
         const date = new Date(record.created_at).toLocaleDateString();
         const duration = Utils.formatDuration(record.duration_minutes);
-        message += `• ${date}: ${record.start_time} - ${record.end_time} (${duration})\n`;
+        const visitor = record.visitor_name ? `${record.visitor_name} - ` : '';
+        message += `• ${date}: ${visitor}${record.car_plate}\n  ${record.start_time} - ${record.end_time} (${duration})\n`;
       }
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -229,9 +230,22 @@ Need help? Just send me a photo! 📸
         return;
       }
 
+      // Check for duplicate entries
+      const isDuplicate = await this.db.checkDuplicateRecord(userId, timeData.carPlate, timeData.startTime);
+      if (isDuplicate) {
+        await this.bot.sendMessage(chatId, 
+          `🚫 *Duplicate Entry Detected*\n\nThis parking session already exists:\n🚗 Car: ${timeData.carPlate}\n🕐 Start: ${timeData.startTime}\n\nNo changes made to your total.`, 
+          { parse_mode: 'Markdown' }
+        );
+        await Utils.cleanupFile(filePath);
+        return;
+      }
+
       const recordId = await this.db.addParkingRecord(
         userId,
         username,
+        timeData.visitorName,
+        timeData.carPlate,
         timeData.startTime,
         timeData.endTime,
         timeData.durationMinutes
@@ -243,6 +257,8 @@ Need help? Just send me a photo! 📸
       const successMessage = `
 ${confidenceEmoji} *Parking session recorded!*
 
+👤 Visitor: ${timeData.visitorName}
+🚗 Car Plate: ${timeData.carPlate}
 🕐 Start: ${timeData.startTime}
 🕐 End: ${timeData.endTime}
 ⏱️ Duration: ${timeData.durationFormatted}
