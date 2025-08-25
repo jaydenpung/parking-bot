@@ -58,7 +58,7 @@ GEMINI_API_KEY=your_gemini_api_key
 4. Click "Group Privacy"
 5. Click "Turn off"
 ```
-**Note:** This allows the bot to see all messages in groups, not just commands.
+**Note:** This allows the bot to see all messages in groups, not just commands. This is required to read photos in group.
 
 #### Set Commands Menu
 Send this to BotFather after selecting your bot:
@@ -68,22 +68,9 @@ Send this to BotFather after selecting your bot:
 Then paste:
 current - View this month's parking sessions and total
 history - See complete parking history by month
-reset - Reset current month (requires confirmation)
+reset - Reset current month
+kaboom - Reset all history
 help - Show help message
-```
-
-### 3. Optional Settings
-
-#### Set Description
-```
-/setdescription
-I help track your parking duration by analyzing screenshots of parking tickets/meters.
-```
-
-#### Set About Text
-```
-/setabouttext
-Parking Duration Tracker - OCR-powered parking time tracker
 ```
 
 ## Getting Gemini API Key
@@ -96,7 +83,7 @@ Parking Duration Tracker - OCR-powered parking time tracker
 
 ### Development
 ```bash
-npm start
+npm run dev
 ```
 
 ### Production with Docker (Recommended)
@@ -116,44 +103,7 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-#### Using Docker directly
-```bash
-# Build the image
-docker build -t parking-bot .
-
-# Run the container
-docker run -d \
-  --name parking-bot \
-  --restart unless-stopped \
-  -e TELEGRAM_BOT_TOKEN=your_token \
-  -e GEMINI_API_KEY=your_api_key \
-  -v $(pwd)/data:/usr/src/app/data \
-  parking-bot
-
-# View logs
-docker logs -f parking-bot
-
-# Stop and remove
-docker stop parking-bot
-docker rm parking-bot
-```
-
-### Production with PM2
-```bash
-npm install -g pm2
-pm2 start src/bot.js --name parking-bot
-pm2 save
-pm2 startup
-```
-
 ## Usage
-
-### Commands
-
-- `/current` - View current month's parking sessions and total
-- `/history` - See complete parking history organized by month
-- `/reset` - Reset current month data (requires confirmation)
-- `/help` - Show help message
 
 ### How to Use
 
@@ -167,11 +117,12 @@ pm2 startup
 
 ### Supported Formats
 
-The bot can extract times from various formats:
+The bot can extract times from various formats due to using LLM:
 - Standard: "9:00 AM - 5:00 PM"
 - Military: "0900 - 1700"
 - Text: "From 9:00 to 17:00"
 - Multi-day: "23 Aug 2025, 10:35PM - 24 Aug 2025, 1:00AM"
+- Anything that makes sense
 
 ## Database
 
@@ -202,54 +153,6 @@ parking-bot/
 ├── package.json     # Node.js dependencies
 └── README.md        # This file
 ```
-
-## Docker Deployment Notes
-
-### Data Persistence
-- Database is stored in `./data` directory (created automatically)
-- This directory is mounted as a volume to persist data between container restarts
-- Backup: Simply copy the `data/parking.db` file
-
-### Environment Variables
-- The `.env` file is automatically loaded by docker-compose
-- For production, consider using Docker secrets or environment-specific configs
-
-### Resource Usage
-- Default limits: 1 CPU, 512MB RAM
-- Adjust in `docker-compose.yml` if needed
-- Tesseract OCR may need more memory for large images
-
-## Troubleshooting
-
-### Bot not responding in groups
-- Ensure Group Privacy is turned OFF in BotFather settings
-- Make sure the bot is added as an admin (optional but recommended)
-
-### 409 Conflict Error
-- This means multiple instances are running
-- Kill all processes: `pkill -f "node.*bot.js"`
-- Or if using Docker: `docker-compose down` then `docker-compose up -d`
-
-### OCR not working properly
-- Ensure images are clear and well-lit
-- Text should be readable
-- The bot will show confidence level for each extraction
-
-### Docker Issues
-- If database not persisting: Check `./data` directory permissions
-- If OCR fails: Tesseract is included in the Docker image
-- Memory issues: Increase limits in `docker-compose.yml`
-
-## Security Notes
-
-- Never commit `.env` file to version control
-- Keep your bot token and API keys secret
-- The bot token in `.gitignore` is already configured
-- Database is stored locally and not synced
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
