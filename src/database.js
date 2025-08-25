@@ -40,13 +40,13 @@ class Database {
 
         CREATE TABLE IF NOT EXISTS monthly_totals (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
+          chat_id INTEGER NOT NULL,
           username TEXT,
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
           total_duration_minutes INTEGER DEFAULT 0,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(user_id, month, year)
+          UNIQUE(chat_id, month, year)
         );
       `;
 
