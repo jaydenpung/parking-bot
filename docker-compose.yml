@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  parking-bot:
+    build: .
+    container_name: parking-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NODE_ENV=production
+    volumes:
+      # Persist database
+      - ./data:/usr/src/app/data
+      # Persist downloads (optional)
+      - ./downloads:/usr/src/app/downloads
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M

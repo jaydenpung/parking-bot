@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.env
+parking.db
+*.log
+.DS_Store
+downloads/*
+temp/*
+.git
+.gitignore
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+data/
