@@ -327,6 +327,37 @@ class Database {
     });
   }
 
+  async resetAllHistory(chatId) {
+    return new Promise((resolve, reject) => {
+      // First delete all parking records for this chat
+      const deleteRecordsSql = `
+        DELETE FROM parking_records
+        WHERE chat_id = ?
+      `;
+
+      this.db.run(deleteRecordsSql, [chatId], (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        // Then delete all monthly totals for this chat
+        const resetTotalSql = `
+          DELETE FROM monthly_totals
+          WHERE chat_id = ?
+        `;
+
+        this.db.run(resetTotalSql, [chatId], (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    });
+  }
+
   close() {
     if (this.db) {
       this.db.close((err) => {

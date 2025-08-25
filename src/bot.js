@@ -36,6 +36,7 @@ class ParkingBot {
     this.bot.onText(/\/current/, this.handleCurrent.bind(this));
     this.bot.onText(/\/help/, this.handleHelp.bind(this));
     this.bot.onText(/\/reset/, this.handleReset.bind(this));
+    this.bot.onText(/\/kaboom/, this.handleResetAll.bind(this));
     this.bot.on('photo', this.handlePhoto.bind(this));
     this.bot.on('document', this.handleDocument.bind(this));
 
@@ -166,6 +167,7 @@ class ParkingBot {
 /current - Current month's parking sessions and total
 /history - Complete parking history by month
 /reset - Reset current month (requires confirmation)
+/kaboom - Delete ALL parking history (requires confirmation)
 /help - This help message
 
 *Tips:*
@@ -276,6 +278,114 @@ Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
     } catch (error) {
       console.error('Error in reset handler:', error);
       await this.bot.sendMessage(chatId, '❌ Error initiating reset. Please try again.');
+    }
+  }
+
+  async handleResetAll(msg) {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    try {
+      // Get total records count
+      const allRecords = await this.db.getAllRecordsGroupedByMonth(chatId);
+      const monthlyTotals = await this.db.getMonthlyHistory(chatId);
+
+      if (allRecords.length === 0) {
+        await this.bot.sendMessage(chatId, `🅿️ *Complete History*\n\nNo parking records to reset - your history is already empty.`, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      // Calculate total hours across all months
+      let totalDayMinutes = 0;
+      let totalNightMinutes = 0;
+      for (const totals of monthlyTotals) {
+        totalDayMinutes += totals.total_day_minutes || 0;
+        totalNightMinutes += totals.total_night_minutes || 0;
+      }
+
+      // Create confirmation buttons
+      const confirmationMessage = `
+🚨 *COMPLETE RESET CONFIRMATION*
+
+⚠️ **WARNING: This will delete ALL parking history!**
+
+This will permanently delete:
+• ALL parking records (${allRecords.length} total)
+• ALL monthly totals (${monthlyTotals.length} months)
+• Complete history across all months
+• Cannot be undone
+
+**Current total across all months:**
+☀️ Day: ${Math.floor(totalDayMinutes / 60)}h
+🌙 Night: ${Math.floor(totalNightMinutes / 60)}h
+
+Are you absolutely sure?
+      `;
+
+      const options = {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '🗑️ YES, DELETE ALL', callback_data: `confirm_resetall_${chatId}` },
+              { text: '❌ Cancel', callback_data: `cancel_resetall_${chatId}` }
+            ]
+          ]
+        }
+      };
+
+      await this.bot.sendMessage(chatId, confirmationMessage, options);
+
+      // Handle callback responses
+      this.bot.once('callback_query', async (callbackQuery) => {
+        const data = callbackQuery.data;
+        const callbackChatId = callbackQuery.message.chat.id;
+        const callbackUserId = callbackQuery.from.id;
+
+        // Only allow the same user who initiated the reset to confirm
+        if (callbackUserId !== userId) {
+          await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Only the user who initiated the reset can confirm.', show_alert: true });
+          return;
+        }
+
+        if (data === `confirm_resetall_${chatId}`) {
+          try {
+            await this.db.resetAllHistory(chatId);
+            await this.bot.editMessageText(
+              `✅ *Complete Reset Done*\n\nAll parking history has been permanently deleted.\n\n• ${allRecords.length} records deleted\n• ${monthlyTotals.length} months cleared\n• All totals reset to 0`,
+              {
+                chat_id: callbackChatId,
+                message_id: callbackQuery.message.message_id,
+                parse_mode: 'Markdown'
+              }
+            );
+            await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'All history deleted.' });
+          } catch (error) {
+            console.error('Error resetting all history:', error);
+            await this.bot.editMessageText(
+              '❌ Error deleting history. Please try again.',
+              {
+                chat_id: callbackChatId,
+                message_id: callbackQuery.message.message_id
+              }
+            );
+            await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Reset failed.' });
+          }
+        } else if (data === `cancel_resetall_${chatId}`) {
+          await this.bot.editMessageText(
+            '✅ Reset cancelled. All history preserved.',
+            {
+              chat_id: callbackChatId,
+              message_id: callbackQuery.message.message_id
+            }
+          );
+          await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Reset cancelled.' });
+        }
+      });
+
+    } catch (error) {
+      console.error('Error in resetall handler:', error);
+      await this.bot.sendMessage(chatId, '❌ Error initiating complete reset. Please try again.');
     }
   }
 
