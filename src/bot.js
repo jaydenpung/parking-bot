@@ -63,6 +63,7 @@ I help you track your parking time by analyzing screenshots of parking tickets o
 /current - View this month's total parking time
 /history - See previous months' totals
 /recent - Show your last 5 parking sessions
+/reset - Reset current month (requires confirmation)
 /help - Show this help message
 
 Just send me a photo to get started! 🎯
