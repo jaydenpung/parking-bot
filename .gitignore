@@ -3,6 +3,5 @@ node_modules/
 parking.db
 *.log
 .DS_Store
-downloads/
 temp/
 eng.traineddata

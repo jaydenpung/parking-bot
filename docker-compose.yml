@@ -12,8 +12,6 @@ services:
     volumes:
       # Persist database
       - ./data:/usr/src/app/data
-      # Persist downloads (optional)
-      - ./downloads:/usr/src/app/downloads
     logging:
       driver: "json-file"
       options:

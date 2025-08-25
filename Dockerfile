@@ -26,7 +26,7 @@ RUN npm ci --only=production
 COPY src/ ./src/
 
 # Create necessary directories
-RUN mkdir -p downloads temp
+RUN mkdir -p temp
 
 # Create volume for database persistence
 VOLUME ["/usr/src/app/data"]

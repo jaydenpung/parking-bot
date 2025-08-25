@@ -456,7 +456,7 @@ Are you absolutely sure?
       const fileUrl = `https://api.telegram.org/file/bot${this.token}/${file.file_path}`;
       
       const filename = Utils.generateUniqueFilename('jpg');
-      const filePath = path.join(__dirname, '..', 'downloads', filename);
+      const filePath = path.join(__dirname, '..', 'temp', filename);
       
       await Utils.downloadFile(fileUrl, filePath);
       

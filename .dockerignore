@@ -4,7 +4,6 @@ npm-debug.log
 parking.db
 *.log
 .DS_Store
-downloads/*
 temp/*
 .git
 .gitignore
