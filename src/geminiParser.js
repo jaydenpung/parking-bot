@@ -18,17 +18,19 @@ ${ocrText}
 Instructions:
 1. Look for start and end times (could be in formats like "9:00 AM - 5:00 PM", "0900-1700", "From 9:00 to 17:00", etc.)
 2. Extract visitor name (usually found near "Visitor Name" field)
-3. Extract car plate number (usually found near "Car Plate No" or similar field)
-4. Convert times to 24-hour format (HH:MM)
-5. Calculate duration in minutes
-6. Return ONLY a JSON object with this exact structure:
+3. Extract car plate number (usually found near "Car Plate No" or similar field)  
+4. Extract or infer parking date (look for dates like "2024-08-25", "25/08/2024", "25 Aug 2024", etc.)
+5. Convert to full datetime strings in ISO format (YYYY-MM-DDTHH:MM:SS)
+6. If no date found, assume today's date
+7. Calculate duration in minutes (handle multi-day parking)
+8. Return ONLY a JSON object with this exact structure:
 
 {
   "success": true/false,
   "visitorName": "extracted name",
   "carPlate": "extracted plate number",
-  "startTime": "HH:MM" (24-hour format),
-  "endTime": "HH:MM" (24-hour format),
+  "startDateTime": "YYYY-MM-DDTHH:MM:SS" (ISO format),
+  "endDateTime": "YYYY-MM-DDTHH:MM:SS" (ISO format),
   "durationMinutes": number,
   "confidence": "high"/"medium"/"low"
 }
@@ -41,10 +43,12 @@ If you cannot find clear start and end times, return:
 }
 
 Examples:
-- Input: "Visitor Name: John Doe, Car Plate No: ABC123, 9:00 AM - 5:00 PM" 
-  → {"success": true, "visitorName": "John Doe", "carPlate": "ABC123", "startTime": "09:00", "endTime": "17:00", "durationMinutes": 480, "confidence": "high"}
+- Input: "Visitor Name: John Doe, Car Plate No: ABC123, Date: 2024-08-25, 9:00 AM - 5:00 PM" 
+  → {"success": true, "visitorName": "John Doe", "carPlate": "ABC123", "startDateTime": "2024-08-25T09:00:00", "endDateTime": "2024-08-25T17:00:00", "durationMinutes": 480, "confidence": "high"}
 - Input: "From 0900 to 1730, Plate: XYZ789, Name: Jane Smith" 
-  → {"success": true, "visitorName": "Jane Smith", "carPlate": "XYZ789", "startTime": "09:00", "endTime": "17:30", "durationMinutes": 510, "confidence": "high"}
+  → {"success": true, "visitorName": "Jane Smith", "carPlate": "XYZ789", "startDateTime": "2024-08-25T09:00:00", "endDateTime": "2024-08-25T17:30:00", "durationMinutes": 510, "confidence": "high"}
+- Input: "Start: 2024-08-25 14:00, End: 2024-08-26 08:00, Car: DEF456"
+  → {"success": true, "visitorName": "Unknown", "carPlate": "DEF456", "startDateTime": "2024-08-25T14:00:00", "endDateTime": "2024-08-26T08:00:00", "durationMinutes": 1080, "confidence": "high"}
 
 Return ONLY the JSON object, no other text.
     `;
@@ -72,12 +76,12 @@ Return ONLY the JSON object, no other text.
       }
 
       // Validate the response structure
-      if (parsedResult.success && parsedResult.startTime && parsedResult.endTime && typeof parsedResult.durationMinutes === 'number') {
+      if (parsedResult.success && parsedResult.startDateTime && parsedResult.endDateTime && typeof parsedResult.durationMinutes === 'number') {
         return {
           visitorName: parsedResult.visitorName || 'Unknown',
           carPlate: parsedResult.carPlate || 'Unknown',
-          startTime: parsedResult.startTime,
-          endTime: parsedResult.endTime,
+          startDateTime: parsedResult.startDateTime,
+          endDateTime: parsedResult.endDateTime,
           durationMinutes: parsedResult.durationMinutes,
           durationFormatted: this.formatDuration(parsedResult.durationMinutes),
           confidence: parsedResult.confidence || 'medium',

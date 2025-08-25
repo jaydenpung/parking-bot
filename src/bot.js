@@ -131,10 +131,20 @@ Just send me a photo to get started! 🎯
       let message = '📝 *Recent Parking Sessions:*\n\n';
       
       for (const record of recentRecords) {
-        const date = new Date(record.created_at).toLocaleDateString();
         const duration = Utils.formatDuration(record.duration_minutes);
         const visitor = record.visitor_name ? `${record.visitor_name} - ` : '';
-        message += `• ${date}: ${visitor}${record.car_plate}\n  ${record.start_time} - ${record.end_time} (${duration})\n`;
+        
+        const startDate = new Date(record.start_datetime);
+        const endDate = new Date(record.end_datetime);
+        
+        const startDateStr = startDate.toLocaleDateString();
+        const endDateStr = endDate.toLocaleDateString();
+        const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        
+        const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+        
+        message += `• ${dateDisplay}: ${visitor}${record.car_plate}\n  ${startTimeStr} - ${endTimeStr} (${duration})\n`;
       }
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -329,10 +339,11 @@ Current total: *${Utils.formatDetailedDuration(currentTotal)}*
       }
 
       // Check for duplicate entries
-      const isDuplicate = await this.db.checkDuplicateRecord(chatId, timeData.carPlate, timeData.startTime);
+      const isDuplicate = await this.db.checkDuplicateRecord(chatId, timeData.carPlate, timeData.startDateTime);
       if (isDuplicate) {
+        const startDate = new Date(timeData.startDateTime);
         await this.bot.sendMessage(chatId, 
-          `🚫 *Duplicate Entry Detected*\n\nThis parking session already exists:\n🚗 Car: ${timeData.carPlate}\n🕐 Start: ${timeData.startTime}\n\nNo changes made to your total.`, 
+          `🚫 *Duplicate Entry Detected*\n\nThis parking session already exists:\n🚗 Car: ${timeData.carPlate}\n📅 Date: ${startDate.toLocaleDateString()}\n🕐 Start: ${startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}\n\nNo changes made to your total.`, 
           { parse_mode: 'Markdown' }
         );
         await Utils.cleanupFile(filePath);
@@ -345,21 +356,32 @@ Current total: *${Utils.formatDetailedDuration(currentTotal)}*
         username,
         timeData.visitorName,
         timeData.carPlate,
-        timeData.startTime,
-        timeData.endTime,
+        timeData.startDateTime,
+        timeData.endDateTime,
         timeData.durationMinutes
       );
 
       const currentTotal = await this.db.getCurrentMonthTotal(chatId);
       
       const confidenceEmoji = timeData.confidence === 'high' ? '🎯' : timeData.confidence === 'medium' ? '✅' : '⚠️';
+      const startDate = new Date(timeData.startDateTime);
+      const endDate = new Date(timeData.endDateTime);
+      
+      const startDateStr = startDate.toLocaleDateString();
+      const endDateStr = endDate.toLocaleDateString();
+      const startTimeStr = startDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+      const endTimeStr = endDate.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+      
+      const dateDisplay = startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+      
       const successMessage = `
 ${confidenceEmoji} *Parking session recorded!*
 
 👤 Visitor: ${timeData.visitorName}
 🚗 Car Plate: ${timeData.carPlate}
-🕐 Start: ${timeData.startTime}
-🕐 End: ${timeData.endTime}
+📅 Date: ${dateDisplay}
+🕐 Start: ${startTimeStr}
+🕐 End: ${endTimeStr}
 ⏱️ Duration: ${timeData.durationFormatted}
 🤖 Confidence: ${timeData.confidence}
 

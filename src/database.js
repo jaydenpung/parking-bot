@@ -30,8 +30,8 @@ class Database {
           username TEXT,
           visitor_name TEXT,
           car_plate TEXT,
-          start_time TEXT NOT NULL,
-          end_time TEXT NOT NULL,
+          start_datetime DATETIME NOT NULL,
+          end_datetime DATETIME NOT NULL,
           duration_minutes INTEGER NOT NULL,
           month INTEGER NOT NULL,
           year INTEGER NOT NULL,
@@ -62,64 +62,69 @@ class Database {
   }
 
   async addNewColumns() {
-    return new Promise((resolve, reject) => {
-      // Add visitor_name column if it doesn't exist
-      this.db.run('ALTER TABLE parking_records ADD COLUMN visitor_name TEXT', (err) => {
-        if (err && !err.message.includes('duplicate column name')) {
-          console.error('Error adding visitor_name column:', err);
-        }
-        
-        // Add car_plate column if it doesn't exist
-        this.db.run('ALTER TABLE parking_records ADD COLUMN car_plate TEXT', (err) => {
-          if (err && !err.message.includes('duplicate column name')) {
-            console.error('Error adding car_plate column:', err);
-          }
-          
-          // Add chat_id column if it doesn't exist
-          this.db.run('ALTER TABLE parking_records ADD COLUMN chat_id INTEGER', (err) => {
-            if (err && !err.message.includes('duplicate column name')) {
-              console.error('Error adding chat_id column:', err);
+    // Helper function to promisify db.run
+    const runQuery = (sql, params = []) => {
+      return new Promise((resolve, reject) => {
+        this.db.run(sql, params, function(err) {
+          if (err) {
+            if (err.message.includes('duplicate column name')) {
+              resolve(); // Ignore duplicate column errors
+            } else {
+              reject(err);
             }
-            
-            // Add chat_id to monthly_totals too
-            this.db.run('ALTER TABLE monthly_totals ADD COLUMN chat_id INTEGER', (err) => {
-              if (err && !err.message.includes('duplicate column name')) {
-                console.error('Error adding chat_id column to monthly_totals:', err);
-              }
-              
-              // Create indexes
-              const indexSql = `
-                CREATE INDEX IF NOT EXISTS idx_chat_month_year ON parking_records(chat_id, month, year);
-                CREATE INDEX IF NOT EXISTS idx_monthly_totals_chat ON monthly_totals(chat_id, month, year);
-                CREATE INDEX IF NOT EXISTS idx_duplicate_check ON parking_records(chat_id, car_plate, start_time);
-              `;
-              
-              this.db.exec(indexSql, (err) => {
-                if (err) {
-                  console.error('Error creating indexes:', err);
-                }
-                console.log('Database migration completed');
-                resolve();
-              });
-            });
-          });
+          } else {
+            resolve();
+          }
         });
       });
-    });
+    };
+
+    const execQuery = (sql) => {
+      return new Promise((resolve, reject) => {
+        this.db.exec(sql, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    };
+
+    try {
+      // Add all columns sequentially
+      await runQuery('ALTER TABLE parking_records ADD COLUMN visitor_name TEXT');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN car_plate TEXT');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN chat_id INTEGER');
+      await runQuery('ALTER TABLE monthly_totals ADD COLUMN chat_id INTEGER');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN start_datetime DATETIME');
+      await runQuery('ALTER TABLE parking_records ADD COLUMN end_datetime DATETIME');
+
+      // Create indexes
+      const indexSql = `
+        CREATE INDEX IF NOT EXISTS idx_chat_month_year ON parking_records(chat_id, month, year);
+        CREATE INDEX IF NOT EXISTS idx_monthly_totals_chat ON monthly_totals(chat_id, month, year);
+        CREATE INDEX IF NOT EXISTS idx_duplicate_check ON parking_records(chat_id, car_plate, start_datetime);
+      `;
+      
+      await execQuery(indexSql);
+      console.log('Database migration completed');
+    } catch (error) {
+      console.error('Error during database migration:', error);
+      throw error;
+    }
   }
 
-  async addParkingRecord(chatId, userId, username, visitorName, carPlate, startTime, endTime, durationMinutes) {
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
+  async addParkingRecord(chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes) {
+    // Extract date components from start datetime for monthly tracking
+    const startDate = new Date(startDateTime);
+    const month = startDate.getMonth() + 1;
+    const year = startDate.getFullYear();
 
     return new Promise((resolve, reject) => {
       const sql = `
-        INSERT INTO parking_records (chat_id, user_id, username, visitor_name, car_plate, start_time, end_time, duration_minutes, month, year)
+        INSERT INTO parking_records (chat_id, user_id, username, visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, month, year)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      this.db.run(sql, [chatId, userId, username, visitorName, carPlate, startTime, endTime, durationMinutes, month, year], function(err) {
+      this.db.run(sql, [chatId, userId, username, visitorName, carPlate, startDateTime, endDateTime, durationMinutes, month, year], function(err) {
         if (err) {
           reject(err);
         } else {
@@ -131,15 +136,15 @@ class Database {
     });
   }
 
-  async checkDuplicateRecord(chatId, carPlate, startTime) {
+  async checkDuplicateRecord(chatId, carPlate, startDateTime) {
     return new Promise((resolve, reject) => {
       const sql = `
         SELECT id FROM parking_records
-        WHERE chat_id = ? AND car_plate = ? AND start_time = ?
+        WHERE chat_id = ? AND car_plate = ? AND start_datetime = ?
         LIMIT 1
       `;
 
-      this.db.get(sql, [chatId, carPlate, startTime], (err, row) => {
+      this.db.get(sql, [chatId, carPlate, startDateTime], (err, row) => {
         if (err) {
           reject(err);
         } else {
@@ -166,8 +171,9 @@ class Database {
           
           // If no rows were updated, insert new record
           if (this.changes === 0) {
-            const db = this.db;
-            db.run(
+            // Fix: Use the outer scope's 'this.db' reference
+            const outerThis = this;
+            outerThis.db.run(
               `INSERT INTO monthly_totals (chat_id, username, month, year, total_duration_minutes) 
                VALUES (?, ?, ?, ?, ?)`,
               [chatId, username, month, year, additionalMinutes],
@@ -182,7 +188,7 @@ class Database {
           } else {
             resolve();
           }
-        }
+        }.bind(this)
       );
     });
   }
@@ -232,7 +238,7 @@ class Database {
   async getRecentRecords(chatId, limit = 5) {
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT visitor_name, car_plate, start_time, end_time, duration_minutes, created_at
+        SELECT visitor_name, car_plate, start_datetime, end_datetime, duration_minutes, created_at
         FROM parking_records
         WHERE chat_id = ?
         ORDER BY created_at DESC
