@@ -137,7 +137,6 @@ class ParkingBot {
       message += `\n📊 *Monthly Total:*\n`;
       message += `☀️ Day: ${dayHours}h ${dayMins}m / 80h${dayWarning}\n`;
       message += `🌙 Night: ${nightHours}h ${nightMins}m / 80h${nightWarning}\n`;
-      message += `**Total: ${Utils.formatDetailedDuration(currentTotal.total)}**`;
 
       await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     } catch (error) {
