@@ -478,8 +478,7 @@ Current total: *${Utils.formatDetailedDuration(currentTotal.total)}*
         if (errorCount > 0) summaryMessage += `❌ Errors: ${errorCount}\n`;
         summaryMessage += `\n📊 *Updated Monthly Total:*\n`;
         summaryMessage += `☀️ Day: ${dayHours}h / 80h${dayWarning}\n`;
-        summaryMessage += `🌙 Night: ${nightHours}h / 80h${nightWarning}\n`;
-        summaryMessage += `**Total: ${Utils.formatDetailedDuration(currentTotal.total)}**`;
+        summaryMessage += `🌙 Night: ${nightHours}h / 80h${nightWarning}`;
 
         await this.bot.sendMessage(chatId, summaryMessage, { parse_mode: 'Markdown' });
       } else {
@@ -530,7 +529,6 @@ ${confidenceEmoji} *Parking session recorded!*
 📊 *This month's total:*
 ☀️ Day: ${dayHoursUsed}h / 80h${dayWarning}
 🌙 Night: ${nightHoursUsed}h / 80h${nightWarning}
-Total: ${Utils.formatDetailedDuration(currentTotal.total)}
     `;
 
     await this.bot.sendMessage(chatId, successMessage, { parse_mode: 'Markdown' });
